@@ -26,6 +26,7 @@ from llama_index.core.types import BaseOutputParser, PydanticProgramMode
 from llama_index.llms.vllm.utils import get_response, post_http_request
 import atexit
 
+from llama_index.core.constants import DEFAULT_CONTEXT_WINDOW
 
 class Vllm(LLM):
     r"""
@@ -63,6 +64,11 @@ class Vllm(LLM):
         ```
 
     """
+
+    context_window: int = Field(
+        default=DEFAULT_CONTEXT_WINDOW,
+        description="The maximum number of tokens in the context window."
+    )
 
     model: Optional[str] = Field(description="The HuggingFace Model to use.")
 
@@ -179,6 +185,7 @@ class Vllm(LLM):
         pydantic_program_mode: PydanticProgramMode = PydanticProgramMode.DEFAULT,
         output_parser: Optional[BaseOutputParser] = None,
         is_chat_model: Optional[bool] = False,
+        context_window: Optional[int] = DEFAULT_CONTEXT_WINDOW,
     ) -> None:
         callback_manager = callback_manager or CallbackManager([])
         super().__init__(
@@ -205,6 +212,7 @@ class Vllm(LLM):
             pydantic_program_mode=pydantic_program_mode,
             output_parser=output_parser,
             is_chat_model=is_chat_model,
+            context_window=context_window,
         )
         if not api_url:
             try:
@@ -228,6 +236,13 @@ class Vllm(LLM):
     @classmethod
     def class_name(cls) -> str:
         return "Vllm"
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(model_name=self.model,
+        context_window=self.context_window,
+        num_output=self.max_new_tokens or -1,
+        )
 
     @property
     def metadata(self) -> LLMMetadata:
@@ -388,6 +403,7 @@ class VllmServer(Vllm):
         vllm_kwargs: Dict[str, Any] = {},
         callback_manager: Optional[CallbackManager] = None,
         output_parser: Optional[BaseOutputParser] = None,
+        context_window: Optional[int] = DEFAULT_CONTEXT_WINDOW,
     ) -> None:
         messages_to_prompt = messages_to_prompt or generic_messages_to_prompt
         completion_to_prompt = completion_to_prompt or (lambda x: x)
@@ -414,6 +430,7 @@ class VllmServer(Vllm):
             api_url=api_url,
             callback_manager=callback_manager,
             output_parser=output_parser,
+            context_window=context_window,
         )
         self._client = None
 
