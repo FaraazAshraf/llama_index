@@ -251,6 +251,7 @@ class Vllm(LLM):
     @property
     def _model_kwargs(self) -> Dict[str, Any]:
         base_kwargs = {
+            "model" : self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_new_tokens,
             "n": self.n,
@@ -446,10 +447,11 @@ class VllmServer(Vllm):
     ) -> CompletionResponse:
         kwargs = kwargs if kwargs else {}
         params = {**self._model_kwargs, **kwargs}
-
-        # build sampling parameters
         sampling_params = dict(**params)
-        sampling_params["prompt"] = prompt
+
+        # sampling_params["prompt"] = prompt 
+        sampling_params["prompt"] = self.completion_to_prompt(prompt)
+
         response = post_http_request(self.api_url, sampling_params, stream=False)
         output = get_response(response)
 
@@ -463,24 +465,49 @@ class VllmServer(Vllm):
         params = {**self._model_kwargs, **kwargs}
 
         sampling_params = dict(**params)
-        sampling_params["prompt"] = prompt
+        # sampling_params["prompt"] = prompt
+        sampling_params["prompt"] = self.completion_to_prompt(prompt)
         response = post_http_request(self.api_url, sampling_params, stream=True)
 
+        # def gen() -> CompletionResponseGen:
+        #     response_str = ""
+        #     prev_prefix_len = len(prompt)
+        #     for chunk in response.iter_lines(
+        #         chunk_size=8192, decode_unicode=False, delimiter=b"\0"
+        #     ):
+        #         if chunk:
+        #             # print(chunk)
+        #             data = json.loads(chunk.decode("utf-8"))
+
+        #             increasing_concat = data["text"][0]
+        #             pref = prev_prefix_len
+        #             prev_prefix_len = len(increasing_concat)
+        #             yield CompletionResponse(
+        #                 text=increasing_concat, delta=increasing_concat[pref:]
+        #             )
+        
+        
         def gen() -> CompletionResponseGen:
             response_str = ""
-            prev_prefix_len = len(prompt)
-            for chunk in response.iter_lines(
-                chunk_size=8192, decode_unicode=False, delimiter=b"\0"
-            ):
-                if chunk:
-                    data = json.loads(chunk.decode("utf-8"))
-
-                    increasing_concat = data["text"][0]
-                    pref = prev_prefix_len
-                    prev_prefix_len = len(increasing_concat)
-                    yield CompletionResponse(
-                        text=increasing_concat, delta=increasing_concat[pref:]
-                    )
+            for line in response.iter_lines(chunk_size=8192, decode_unicode=False):
+                if line:
+                    line = line.decode('utf-8').strip()
+                    if line == 'data: [DONE]':
+                        break
+                    if line.startswith('data: '):
+                        data_str = line[len('data: '):]
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError as e:
+                            print(f"Error decoding JSON: {e}")
+                            continue  
+                        choice = data['choices'][0]
+                        delta_text = choice['text']
+                        response_str += delta_text
+                        yield CompletionResponse(text=response_str, delta=delta_text)
+                    else:
+                        # Handle unexpected lines if necessary
+                        continue
 
         return gen()
 
